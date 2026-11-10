@@ -1,0 +1,1 @@
+Five unit tests passed. Synthetic full evaluation passed for two/four branches and all trainable models; absent ASR scores zero. Notebook code cells parse. Dataset metadata sampling verified: 500 videos, 114131956 bytes. GPU model inference and full real-data retrieval have not been run.

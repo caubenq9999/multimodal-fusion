@@ -1,0 +1,2481 @@
+=== PAGE 1 ===
+000
+001
+002
+003
+004
+005
+006
+007
+008
+009
+010
+011
+012
+013
+014
+015
+016
+017
+018
+019
+020
+021
+022
+023
+024
+025
+026
+027
+028
+029
+030
+031
+032
+033
+034
+035
+036
+037
+038
+039
+040
+041
+042
+043
+044
+045
+046
+047
+048
+049
+050
+051
+052
+053
+Under review as a conference paper at ICLR 2027
+CROSS-MODALQUERYFUSION ANDALIGNMENT: AD-
+DRESSINGMODALITYIMBALANCE THROUGHQUERY-
+GUIDEDFUSION
+Anonymous authors
+Paper under double-blind review
+ABSTRACT
+Modality imbalance remains a fundamental challenge in multimodal learning,
+where dominant modalities disproportionately shape optimization while weaker
+modalities are underutilized. Existing studies mainly analyze this problem through
+optimization behavior, training losses, and final task performance, paying compara-
+tively little attention to the intrinsic structure of multimodal representations. In this
+work, we revisit modality imbalance from a structural perspective and identify two
+coupled failure modes: representation-level imbalance, in which modalities occupy
+mismatched low-dimensional subspaces, and fusion-level imbalance, in which
+shared fusion layers suppress weak-modality contributions through destructive
+cross-modal entanglement. This decomposition suggests that correcting optimiza-
+tion imbalance alone is insufficient, as improved representation alignment does
+not guarantee balanced utilization after fusion. To address these two sources of
+imbalance, we propose Cross-Modal Query Fusion and Alignment (CQFA), a
+query-guided framework that explicitly separates modality-specific representa-
+tion learning from controlled cross-modal interaction through staged training and
+query-partitioned fusion. Specifically, staged objectives over modality-specific
+expert queries stabilize modality-specific representations and strengthen cross-
+modal correspondence before full fusion, while dual query-guided fusion streams
+together with logit-level aggregation alleviate fusion-level imbalance by reduc-
+ing premature entanglement and hard shared bottlenecks. On CREMA-D and
+Kinetics-400, CQFA improves upon state-of-the-art results, achieving 89.94/89.94
+and 71.85/71.66 ACC/F1, respectively.
+1 INTRODUCTION
+Multimodal learning aims to jointly model and integrate information from heterogeneous sources such
+as images, audio, text, and video in order to build richer and more robust representations Baltrušaitis
+et al. (2019); Caffagni et al. (2024). Multimodal systems are equipped to reflect the complexity of
+real-world data by capturing complementary cues across modalities Yin et al. (2024). In recent years,
+this paradigm has gained significant traction, fueled by the availability of large-scale paired datasets
+and the success of foundation models like CLIP Radford et al. (2021) and CLAP Elizalde et al. (2023).
+These advancements have yielded significant performance gains across a range of tasks, including
+visual question answering Ding et al. (2022), cross-modal retrieval Wang et al. (2024), audio-visual
+processing Du et al. (2025); Wu et al. (2025), and sentiment analysis Das & Singh (2023). Despite
+these advances, effective multimodal integration remains challenging. Multimodal fusion may still
+exhibit bias or redundancy, and in some cases multimodal models have been observed to perform
+worse than strong unimodal baselines, revealing a persistent gap between the promise of multimodal
+learning and its realized potential Xu et al. (2025).
+To mitigate this issue, existing methods address modality imbalance through interventions at different
+stages, including data-level reweighting or modality selection Wei et al. (2024), feedforward modula-
+tion and adaptive fusion Zhang et al. (2024a); Wei et al. (2025b); Zhou et al. (2023), and balancing
+strategies at the objective or optimization level Wei & Hu (2024); Yang et al. (2024). Despite their
+differences, these approaches largely share a common assumption: modality imbalance is primarily
+a training-dynamics problem that can be alleviated by reweighting samples, suppressing dominant
+1
+Reviewers:pleasereadtheReviewerGuidelines(iclr.cc/Conferences/2027/ReviewerGuidelines)andtheAIPolicyforReviewers(iclr.cc/Conferences/2027/AIPolicyForReviewers).
+If you used AI to expand, edit, or polish your review, please provide the input text to the LLM. Better still, consider skipping the LLM and submitting your original text: we,
+and the authors, are much more interested in your unedited thoughts than in what an LLM has to say. AI-assisted or not, you are putting your name and reputation behind
+your review: LLM-generated falsehoods, hallucinations or misrepresentations are subject to disciplinary action, which may include desk-rejecting all papers you have authored.
+
+=== PAGE 2 ===
+054
+055
+056
+057
+058
+059
+060
+061
+062
+063
+064
+065
+066
+067
+068
+069
+070
+071
+072
+073
+074
+075
+076
+077
+078
+079
+080
+081
+082
+083
+084
+085
+086
+087
+088
+089
+090
+091
+092
+093
+094
+095
+096
+097
+098
+099
+100
+101
+102
+103
+104
+105
+106
+107
+Under review as a conference paper at ICLR 2027
+signals, or reshaping gradients and losses. Although these treatments have yielded empirical improve-
+ments, they generally do not disentangle whether performance degradation stems from imbalanced
+representational structure prior to fusion or from asymmetric modality utilization within the fusion
+module itself. As a result, existing methods often mitigate the symptoms of imbalance without fully
+explaining where the imbalance emerges and why weaker modalities can remain underexploited even
+after the optimization is rebalanced.
+This distinction implies that addressing a single level, e.g., improving representation alignment
+alone, may not resolve downstream modality underutilization after fusion. This motivates separating
+representation stabilization from fusion control in both training and architecture. To address these
+coupled sources of imbalance, we propose a framework that explicitly separates representation
+stabilization from controlled multimodal fusion. To mitigate representation-level imbalance, CQFA
+introduces a multi-stage training scheme over modality-specific expert queries, combining contrastive
+alignment, cross-modal matching, and task supervision to stabilize modality-specific representations
+and strengthen semantic correspondence before full multimodal fusion. To mitigate fusion-level
+imbalance, CQFA employs a shared Q-Former with distinct learnable expert and fusion queries, so
+that modality-specific evidence extraction and cross-modal interaction are handled by different query
+groups. The final prediction is produced through a decoupled logits-fusion strategy rather than by
+compressing both modalities into a single shared fused feature, thereby preserving modality-specific
+decision channels and alleviating weak-modality underutilization in the fusion head. Through this
+joint design of staged optimization and query-based interaction, CQFA addresses both representation-
+level imbalance and fusion-level imbalance within a unified framework, extending prior work that
+treats alignment and fusion separately.
+To support reproducibility, we will publicly release the implementation, pretrained checkpoints, and
+evaluation code upon acceptance. Building on this structural view, the main contributions of this
+study are summarized as follows:
+(1) We formulate modality imbalance from a two-level structural perspective, distinguishing
+representation-level imbalance, reflected by dimension-collapse-induced subspace misalignment
+and its associated modality gap, from fusion-level imbalance, reflected by weak-modality underuti-
+lization caused by collision-induced interference in shared fusion layers.
+(2) We develop a geometric analysis framework for diagnosing modality imbalance, combining
+effective-dimension analysis with principal-angle-based modality-gap measurement to quantify
+low-dimensional subspace structure, cross-modal misalignment, and their layer-wise evolution.
+(3) We propose Cross-Modal Query Fusion and Alignment (CQFA), a query-guided framework that
+combines learnable expert and fusion queries, multi-stage alignment objectives, and decoupled logits
+fusion to stabilize modality-specific representations and control cross-modal interaction.
+(4) Extensive experiments and representation analyses on CREMA-D, A VE, and Kinetics-400 show
+that CQFA delivers strong multimodal classification performance and that its gains are associated
+with improved high-level alignment and post-fusion consistency, rather than simply minimizing the
+raw backbone modality gap.
+2 RELATEDWORK
+2.1 MODALITYIMBALANCE
+Recent survey work Xu et al. (2025) suggests that multimodal imbalance methods can be organized
+according to the stage at which they intervene. Data-level methods operate on the training distribution
+or batch composition to strengthen weak modalities before feature learning and fusion Wei et al.
+(2024); Ma et al. (2025). Feed-forward and fusion-level methods modify modality processing
+or cross-modal interaction during forward propagation, often by adapting unimodal behavior or
+estimating modality reliability Zhang et al. (2024a; 2023); Fan et al. (2024). Objective-based methods
+redesign losses to align modalities, improve discriminability, or balance multimodal and unimodal
+learning signals Yang et al. (2024); Wei & Hu (2024); Yu et al. (2026); Xu et al. (2023); Jiang et al.
+(2025). Optimization-based methods act directly on update dynamics by reweighting or disentangling
+gradients to reduce modality competition and cross-modal interference Peng et al. (2022); Li et al.
+(2023); Fan et al. (2023); Wei et al. (2025a). These studies show that imbalance can be mitigated at
+2
+
+=== PAGE 3 ===
+108
+109
+110
+111
+112
+113
+114
+115
+116
+117
+118
+119
+120
+121
+122
+123
+124
+125
+126
+127
+128
+129
+130
+131
+132
+133
+134
+135
+136
+137
+138
+139
+140
+141
+142
+143
+144
+145
+146
+147
+148
+149
+150
+151
+152
+153
+154
+155
+156
+157
+158
+159
+160
+161
+Under review as a conference paper at ICLR 2027
+multiple stages, but most taxonomies mainly describewherethe intervention is applied. They provide
+limited insight into whether the failure originates from representation-level structural mismatch
+or from imbalance introduced during multimodal fusion, motivating a more mechanism-oriented
+formulation.
+2.2 MODALITYGAP
+An emerging body of work has examined multimodal imbalance through the geometry of shared
+representation spaces. Liang et al. Liang et al. (2022) first identified themodality gapin multimodal
+contrastive learning, formalizing it as a systematic discrepancy between the centers of normalized
+embeddings from different modalities within a common embedding space. Subsequent studies refined
+this geometric account. In particular, Yi et al. Yi et al. (2025) showed that the modality gap can be
+more precisely interpreted through subspace geometry and pairwise alignment, demonstrating that
+under subspace constraints the observed center discrepancy is governed by the smallest principal
+angle between modality-specific subspaces rather than collapsing to zero. Complementary work has
+further investigated why such mismatch persists. Jing et al. Jing et al. (2022) introduceddimensional
+collapse, showing that contrastive representations may occupy only a low-dimensional subspace of
+the ambient embedding space. Building on this perspective, Zhang et al. Zhang et al. (2024b) related
+modality gap in multimodal models to dimensional collapse and quantified the extent of this collapse
+through theeffective dimensionderived from the singular spectrum of the representation covariance
+matrix. Beyond pre-fusion representation geometry, Chaudhuri et al. Chaudhuri et al. (2025) showed
+that modality collapse can also arise during fusion through cross-modal interference in shared fusion
+heads, indicating that geometric alignment alone does not guarantee balanced modality utilization.
+3 METHODOLOGY
+3.1 A TWO-LEVELVIEW OFMULTIMODALIMBALANCE
+We explain modality imbalance through two coupled levels:representation-level imbalance, where
+different modalities occupy mismatched feature subspaces, andfusion-level imbalance, where the
+fusion head underuses one modality due to cross-modal interference.
+Representation-Level Imbalance.In a standard multimodal framework, disparate modalities are
+mapped into a shared ambient embedding space Rd. However, due to differences in the intrinsic
+complexity of heterogeneous signals, representations frequently suffer fromdimension collapseZhang
+et al. (2024b). Let σ1≥σ 2≥···≥σ d denote the singular values of a modality’s representation
+covariance matrix. The effective dimension is defined mathematically as Zhang et al. (2024b):
+de = arg min
+d′
+∑︁d′
+i=1σi
+∑︁d
+i=1σi
+≥γ,(1)
+whereγ is a variance-explained threshold (e.g., 0.95). Dimension collapse occurs when de≪d .
+Consequently, features from different modalities intrinsically occupy low-dimensional subspaces,
+effectively forcing zx ∈ Sx and zy ∈ Sy, where Sx,Sy ⊆R d and dim(Sx),dim(Sy)≪d .
+Representation-level imbalance inherently emerges when modalities collapse into mismatched sub-
+spaces, i.e.,Sx̸=S y.
+Following Yi et al. (2025), under this subspace constraint, themodality gapcan be theoretically
+interpreted as the angular discrepancy between these modality-specific hyperplanes. Specifically, if
+Ux and Uy act as orthonormal bases ofSx andSy, the gap is structurally related to their smallest
+principal angle:
+θmin = arccos
+(︁
+σmax(U⊤
+x Uy)
+)︁
+.(2)
+This conceptually establishes representation-level imbalance as a combination of low effective
+dimensionality and cross-modal subspace misalignment. We formally operationalize this principal-
+angle view into a computable metric later in Section 3.4.
+Fusion-Level Imbalance.Geometric alignment between modalities does not necessarily ensure
+their balanced utilization during fusion. Following Chaudhuri et al. (2025), we interpret fusion-level
+imbalance through the lens of cross-modal polysemantic interference in a shared, capacity-limited
+3
+
+=== PAGE 4 ===
+162
+163
+164
+165
+166
+167
+168
+169
+170
+171
+172
+173
+174
+175
+176
+177
+178
+179
+180
+181
+182
+183
+184
+185
+186
+187
+188
+189
+190
+191
+192
+193
+194
+195
+196
+197
+198
+199
+200
+201
+202
+203
+204
+205
+206
+207
+208
+209
+210
+211
+212
+213
+214
+215
+Under review as a conference paper at ICLR 2027
+LossAVC
+Video Input XV
+Audio Input XA
+V
+A
+Qv
+Qfv
+Qfa
+Qa
+CLIPImage
+CLAPAudio
+EncoderQuad-Query
+Q-Former
+Embedding LossAVM
+AVM
+Cross-attentionMask Self-attention
+FFN
+AVC
+Cross-attentionMask Self-attention
+FFN
+CLS
+Cross-attentionMask Self-attention
+FFN LossCLS
+❆
+❆
+CLIPText❆ CLAPText❆
+Text Prompt
+Figure 1: Overview of the CQFA framework.
+fusion head. In particular, their Lemma 1 suggests that when fusion neurons are shared across
+modalities under finite capacity, some neurons can simultaneously encode features from different
+modalities, giving rise to cross-modal polysemantic collisions. Building on this view, their Theorem
+1 further implies that as the proportion of such collisions increases, the marginal contribution of
+predictive features from a modality to the optimization of the task objective can vanish:
+lim
+p(wp)→1
+∑︂
+∀zy∈X
+∂
+∂wp
+L(ϕ(zy),y) = 0,(3)
+wherewp denotes polysemantic fusion subspaces or neurons,p(wp) is the proportion of cross-modal
+polysemantic collisions, zy represents predictive features from a modality, andL(ϕ(zy),y) is the
+post-fusion task objective. This indicates that collision-induced interference in shared fusion neurons
+can suppress the optimization contribution of modality-specific predictive signals. We therefore
+define fusion-level imbalance as the progressive underutilization of a modality within the fusion head
+caused by such cross-modal interference.
+3.2 FRAMEWORKOVERVIEW ANDPRELIMINARIES
+Given a synchronized audio-visual sample (xV,xA) with label y∈{1,...,C} , the visual and
+audio inputs are encoded by LoRA-tuned modality-specific backbones and mapped by projection
+heads to obtain modality tokens V∈R B×SV×D and A∈R B×SA×D. The class-text prototypes
+gclip
+t ,g clap
+t ∈R C×D are obtained analogously from the corresponding CLIP and CLAP text encoders
+followed by projection and L2 normalization. These text prototypes provide class-level supervision,
+but they are not fused withVandAas a third modality.
+As shown in Figure 1, CQFA uses a shared Q-Former with four query groups. At layerl, the query
+state is
+Q(l) =
+[︂
+Q(l)
+v ;Q (l)
+f,v;Q (l)
+f,a;Q (l)
+a
+]︂
+,Q (0) is learnable.(4)
+The expert queries Qv and Qa extract modality-specific evidence from V and A, respectively. To
+make the fusion-query generation explicit, letS(Q) denote the Q-Former self-attention update over
+query sequenceQ, and letC v andCa denote two modality-specific cross-attention transformers:
+Cv(Q,V) = MHA v(Q,V,V), C a(Q,A) = MHA a(Q,A,A). (5)
+Here V and A serve as the key-value tokens of the visual and audio cross-attention transformers,
+respectively, and each updated query stream is further processed by the standard FFN in the Q-Former
+4
+
+=== PAGE 5 ===
+216
+217
+218
+219
+220
+221
+222
+223
+224
+225
+226
+227
+228
+229
+230
+231
+232
+233
+234
+235
+236
+237
+238
+239
+240
+241
+242
+243
+244
+245
+246
+247
+248
+249
+250
+251
+252
+253
+254
+255
+256
+257
+258
+259
+260
+261
+262
+263
+264
+265
+266
+267
+268
+269
+Under review as a conference paper at ICLR 2027
+layer. After the self-attention updateS(Q(l)), let [˜︁Q(l)
+v ; ˜︁Q(l)
+f,v; ˜︁Q(l)
+f,a; ˜︁Q(l)
+a ] denote the resulting query
+sequence. The two fusion streams are updated as
+Q(l+1)
+f,v =C a
+(︂
+Cv
+(︂
+˜︁Q(l)
+f,v,V
+)︂
+,A
+)︂
+,Q (l+1)
+f,a =C v
+(︂
+Ca
+(︂
+˜︁Q(l)
+f,a,A
+)︂
+,V
+)︂
+.(6)
+After the final Q-Former layer, we denote the two fusion-query readouts as qfv =Q (L)
+f,v and
+qfa =Q (L)
+f,a .
+3.3 THREE-STAGETRAINING
+CQFA optimizes the shared Q-Former through three stages. A VC trains the expert queries under
+isolated query interactions to stabilize modality-specific representations. A VM opens the interaction
+between the two expert-query groups to learn pairwise audio-visual correspondence. CLS activates
+the two fusion-query groups and routes cross-modal exchange through them for final classification.
+As summarized in Appendix Figure 3, the stages differ in active query groups, self-attention masks,
+and supervision. We reuse the self-attention and cross-attention operators defined in Section 3.2;
+the standard FFN update is applied inside each Q-Former layer and omitted from the equations
+for compactness. In stage s∈{AVC,AVM,CLS} , ˜︁Q(l)
+s denotes the output of the corresponding
+stage-specific masked self-attention. The exact mask patterns are specified in Appendix Figure 3.
+Stage 1: Audio-Vision Contrastive Learning (A VC).A VC uses the isolated expert-query groups.
+After masked self-attention, the expert queries cross-attend only to their own modality:
+Q(l+1)
+v =C v(˜︁Q(l)
+v ,V),Q (l+1)
+a =C a(˜︁Q(l)
+a ,A).(7)
+The final expert-query outputs Q(L)
+v and Q(L)
+a are projected into the two text-aligned spaces and
+L2-normalized to obtain gv and ga, respectively. Using a learnable temperatureτ, the class logits are
+obtained by query-wise max-pooling over the query-to-text similarities:
+svt = MaxPooln
+(︂
+τg v(gclip
+t )⊤
+)︂
+,s at = MaxPooln
+(︂
+τg a(gclap
+t )⊤
+)︂
+.(8)
+Here MaxPooln pools over the query dimension and retains, for each class, the largest similarity score
+among all query tokens, so svt,sat∈R B×C . We then apply cross-entropy lossesLvt = CE(svt,y)
+andLat = CE(sat,y) . To additionally align paired visual and audio query representations, we
+mean-pool and L2-normalize gv and ga to obtain ¯gv and ¯ga, and then apply a symmetric contrastive
+loss:
+Lva =− 1
+2B
+B∑︂
+i=1
+[︄
+log exp(¯g(i)
+v · ¯g(i)
+a /τ)
+∑︁B
+j=1 exp(¯g(i)
+v · ¯g(j)
+a /τ)
++ log exp(¯g(i)
+a · ¯g(i)
+v /τ)
+∑︁B
+j=1 exp(¯g(i)
+a · ¯g(j)
+v /τ)
+]︄
+.(9)
+The A VC objective is
+LA VC=L vt +Lat +Lva.(10)
+Stage 2: Audio-Vision Matching (A VM).A VM removes the fusion-query groups and processes
+only [Qv,Qa] with an open interaction mask. This allows the expert queries to exchange information
+while still cross-attending to their own modalities. The resulting query sequence is fed to a matching
+head:
+zA VM= MLPA VM
+(︂
+[Q(L)
+v ;Q (L)
+a ]
+)︂
+∈R B×2.(11)
+Given binary labelsy match over positive and hard-negative audio-visual pairs, the A VM loss is
+LA VM= CE(zA VM,y match).(12)
+CE(·,·)denotes the cross-entropy loss.
+Stage 3: Fusion Classification (CLS).CLS activates all four query groups and uses a bottleneck
+mask that blocks direct Qv↔Q a communication. Cross-modal exchange is routed through the dual
+fusion streams in Equation 6. The final fusion-query outputs qfv and qfa are projected into CLIP-
+and CLAP-aligned spaces and L2-normalized to obtain gf,v and gf,a, respectively. The two decision
+channels follow the same query-wise pooling rule:
+sv = MaxPooln
+(︂
+τg f,v(gclip
+t )⊤
+)︂
+,s a = MaxPooln
+(︂
+τg f,a(gclap
+t )⊤
+)︂
+.(13)
+5
+
+=== PAGE 6 ===
+270
+271
+272
+273
+274
+275
+276
+277
+278
+279
+280
+281
+282
+283
+284
+285
+286
+287
+288
+289
+290
+291
+292
+293
+294
+295
+296
+297
+298
+299
+300
+301
+302
+303
+304
+305
+306
+307
+308
+309
+310
+311
+312
+313
+314
+315
+316
+317
+318
+319
+320
+321
+322
+323
+Under review as a conference paper at ICLR 2027
+The final prediction uses logits fusion rather than feature concatenation:
+scls =s v +sa∈R B×C,L CLS = CE(scls,y).(14)
+This preserves modality-specific decision channels while aggregating evidence at the score level. The
+total training objective is
+Ltotal =α A VCLA VC+α A VMLA VM+α CLSLCLS.(15)
+Inference.At inference time, CQFA uses the CLS-stage dual fusion streams and predicts
+ˆy= arg max
+c∈{1,...,C}
+scls(c).(16)
+3.4 QUANTIFYINGREPRESENTATION-LEVELMODALITYGAP
+We quantify representation-level modality gap by modeling each modality’s embeddings as an
+effective low-dimensional subspace in the shared representation space. Under dimension collapse,
+imbalance is reflected by the angular mismatch between modality-specific subspaces, which motivates
+a principal-angle-based measure of cross-modal representation misalignment. This formulation is
+inspired by recent analyses of modality-gap subspace geometry and dimension collapse in cross-modal
+representations Yi et al. (2025); Zhang et al. (2024b).
+Formally, assume we have two modality feature matrices Zx∈R N×d and Zy∈R N×d , whereN is
+the number of paired samples andd is the embedding dimension. These modalities effectively reside
+in two low-dimensional subspacesSx,Sy⊆R d. To extract the orthonormal bases of these respective
+subspaces, we perform Singular Value Decomposition (SVD):
+Zx =P xΣxQ⊤
+x,Z y =P yΣyQ⊤
+y.(17)
+Crucially, because the subspaces are defined in the feature embedding space Rd (rather than the
+sample-index space), the basis matrices must be rigorously extracted from the right singular vectors:
+Ux =Q x[:,1 :k x],U y =Q y[:,1 :k y].(18)
+This operation is analytically equivalent to computing the top eigenvectors of the covariance matrices
+Z⊤
+x Zx and Z⊤
+y Zy. The retained subspace dimensions kx andky can be dynamically selected by
+preserving a target explained variance ratioτ(e.g.,0.95):
+∑︁k
+i=1λi
+∑︁d
+i=1λi
+≥τ,(19)
+whereλi denotes the eigenvalues of the corresponding covariance matrix.
+Ultimately, we quantify the modality gap by measuring the smallest principal angle between Sx
+andSy. Given the orthonormal bases Ux and Uy, we compute the overlap matrix M=U ⊤
+x Uy.
+Let the singular values of M be ordered as σ1≥σ 2≥···≥σ k, where k= min(k x,ky). The
+principal angles are defined asθi = arccos(σi). We use the smallest principal angle to quantify the
+representation-level modality gap:
+θmin = arccos
+(︁
+min(1,max(−1,σ max(U⊤
+x Uy)))
+)︁
+,(20)
+where the maximum singular value is strictly clipped into [−1,1] for numerical stability. Under
+this formulation, smaller angles indicate stronger subspace alignment, whereas larger angles reflect
+greater representation-level mismatch between modalities.
+4 EXPERIMENTS
+4.1 EXPERIMENTALSETUP
+Datasets.We evaluate CQFA on three widely used audio-visual classification benchmarks: CREMA-
+D, A VE, and Kinetics-400. CREMA-D Cao et al. (2014) consists of 7,442 audio-visual clips for
+emotion recognition across six classes. A VE Tian et al. (2018) contains 4,143 clips, each 10 seconds
+6
+
+=== PAGE 7 ===
+324
+325
+326
+327
+328
+329
+330
+331
+332
+333
+334
+335
+336
+337
+338
+339
+340
+341
+342
+343
+344
+345
+346
+347
+348
+349
+350
+351
+352
+353
+354
+355
+356
+357
+358
+359
+360
+361
+362
+363
+364
+365
+366
+367
+368
+369
+370
+371
+372
+373
+374
+375
+376
+377
+Under review as a conference paper at ICLR 2027
+long, annotated for audio-visual event classification across 28 classes. Kinetics-400 Kay et al. (2017)
+contains approximately 300,000 clips, each 10 seconds long, covering 400 human action classes.
+Baselines.To evaluate CQFA under a unified modality-imbalance setting, we compare it with
+fourteen representative baselines: AUG Jiang et al. (2025) , OGM Peng et al. (2022), AGM Li et al.
+(2023), PMR Fan et al. (2023), MMPareto Wei & Hu (2024), LFM Yang et al. (2024), MLA Zhang
+et al. (2024a), TCMax Yu et al. (2026), MMCosine Xu et al. (2023), DIMML Fan et al. (2024), Remix
+Ma et al. (2025), QMF Zhang et al. (2023), DGL Wei et al. (2025a), and InfoReg Huang et al. (2025).
+These methods cover gradient modulation, objective balancing, representation alignment, and fusion-
+control strategies. For a fair comparison, all methods use the same pretrained CLIP visual encoder
+and CLAP audio encoder, and both encoders are fine-tuned with LoRA under identical configurations;
+therefore, the comparison mainly reflects differences in fusion and imbalance-mitigation mechanisms.
+Implementation Details and Metrics.We use CLIP ViT-B/32 and CLAP HTS-AT as the visual
+and audio backbones, respectively, and adapt both encoders with LoRA. The visual input consists of
+16 RGB frames resized to 224×224, while the audio input is resampled to 48 kHz and represented
+by 64-bin log-mel features. CQFA projects both modalities into a 512-dimensional query space
+and is trained on an NVIDIA RTX 4090 GPU. Detailed implementation settings are provided in
+Appendix A. We report Accuracy (ACC) and F1 score for classification performance.
+4.2 RESULTS ONDIFFERENTBENCHMARKS
+Table 1 reports the ACC and F1 scores of CQFA and competing methods on CREMA-D, A VE, and
+Kinetics-400. These three benchmarks cover audio-visual emotion recognition, event classification,
+and action recognition, allowing us to evaluate classification performance across different data scales
+and category granularities.
+Table 1: Comparison of different methods on CREMA-D, A VE, and Kinetics-400. Metrics reported
+are Accuracy (ACC) and F1 Score.
+Method Venue (Year) CREMA-D A VE Kinetics-400
+ACC (%) F1 (%) ACC (%) F1 (%) ACC (%) F1 (%)
+OGM CVPR 2022 85.46 85.68 96.52 96.83 69.87 69.52
+AGM ICCV 2023 86.04 85.93 95.02 95.10 65.66 64.96
+PMR CVPR 2023 86.49 86.44 95.02 94.95 70.18 69.69
+MMCosine ICASSP 2023 88.02 88.2097.7697.91 69.52 68.86
+QMF ICML 2023 87.39 87.44 96.27 96.25 70.14 69.66
+MMPareto ICML 2024 88.29 88.32 96.77 96.87 70.68 70.23
+LFM NeurIPS 2024 88.96 89.09 97.26 97.29 70.95 70.53
+MLA CVPR 2024 86.81 87.21 95.27 95.73 64.92 63.75
+DIMML ACM MM 2024 87.84 87.90 96.77 96.58 66.31 65.74
+AUG NeurIPS 2025 88.74 88.7997.76 97.9366.44 65.76
+Remix ICML 2025 87.75 88.01 96.77 97.00 70.50 70.06
+DGL ICCV 2025 87.09 87.13 97.01 97.08 70.13 69.70
+InfoReg CVPR 2025 86.14 86.56 95.52 95.52 65.36 64.39
+TCMax ICLR 2026 86.81 87.03 96.77 96.70 68.25 67.75
+CQFA (Ours)89.94 89.9495.52 95.8771.85 71.66
+The results reveal two main observations. First, CQFA achieves state-of-the-art performance on
+CREMA-D and Kinetics-400, reaching 89.94/89.94 and 71.85/71.66 ACC/F1, respectively, but
+does not obtain the best result on A VE. A plausible explanation is that A VE is relatively small, and
+combining parameter-rich pretrained backbones with an additional Q-Former may increase the risk
+of overfitting. The query-based fusion architecture is therefore more suitable for larger and more
+diverse datasets, where its additional capacity can be more effectively exploited.
+Second, LFM is the strongest non-CQFA baseline on CREMA-D and Kinetics-400, which is consis-
+tent with its use of contrastive learning to reduce cross-modal discrepancy. However, the effective-
+7
+
+=== PAGE 8 ===
+378
+379
+380
+381
+382
+383
+384
+385
+386
+387
+388
+389
+390
+391
+392
+393
+394
+395
+396
+397
+398
+399
+400
+401
+402
+403
+404
+405
+406
+407
+408
+409
+410
+411
+412
+413
+414
+415
+416
+417
+418
+419
+420
+421
+422
+423
+424
+425
+426
+427
+428
+429
+430
+431
+Under review as a conference paper at ICLR 2027
+−5 0 5 10 15 20
+2
+4
+6
+8
+10
+12
+14 video
+audio
+(a) Backbone(v/a)
+−5 0 5 10 15
+0
+2
+4
+6
+8
+audio
+video (b) Specialist queries
+(qa/qv)
+−4 −2 0 2 4 6 8 10 12
+2
+4
+6
+8
+10
+video
+audio
+(c) A VC embeddings
+(gv/ga)
+0 2 4 6 8 10 12 14
+−2
+0
+2
+4
+6
+8
+10
+audio
+video
+(d) Fusion streams
+(qa
+f/qv
+f)
+Figure 2: Layer-wise UMAP gap visualizations of CQFA on the CREMA-D dataset.
+dimension analysis in Table 4 shows that LFM still exhibits a large audio-video effective-dimension
+gap, indicating that it does not fully resolve effective-dimensional collapse. Thus, although LFM
+narrows the modality gap, its representational capacity is not fully released, which limits further
+performance improvement.
+4.3 ABLATIONSTUDIES
+We evaluate training objectives, architectural components, and A VM-weight sensitivity in separate
+experiments. The objective ablation in Appendix C shows that removing A VC lowers performance,
+A VM has dataset-dependent effects, and removing CLS yields near-random results. For the architec-
+tural ablation, we retain all objectives and vary one structural component at a time; Table 2 reports
+ACC/F1 from one validation-selected checkpoint per configuration.
+Table 2: Architectural ablation of CQFA (ACC/F1).
+Variant CREMA-D A VE Kinetics-400
+CQFA89.94/89.9494.03/94.3571.85/71.66
+w/o Bottleneck Mask 87.84/87.88 93.28/94.10 69.68/69.15
+Audio-led Stream 88.44/88.46 94.28/94.74 70.27/69.90
+Video-led Stream 88.14/88.1195.52/95.9070.43/70.10
+Feature Fusion 87.99/87.93 94.03/94.48 70.11/69.83
+w/o Query Partition 86.64/86.64 94.78/95.33 69.56/69.30
+Capacity-Matched Sharing 87.99/87.99 93.78/94.39 69.36/69.08
+w/o Text Prototypes 88.89/88.92 93.53/94.01 70.53/70.19
+Table 2 shows that full CQFA outperforms all architectural controls on CREMA-D and Kinetics-400,
+with ACC margins of 1.05–3.30 and 1.32–2.49 points, respectively. The largest losses arise from
+removing query partitioning on CREMA-D and replacing structured routing on Kinetics-400. Some
+controls perform better on A VE, indicating dataset-dependent sensitivity. Exact parameter parity
+of the capacity-matched sharing control remains unverified. With fusion queries fixed, logit-level
+fusion improves ACC on CREMA-D and Kinetics-400 but not A VE (Appendix D). Permutation tests
+show that CQFA uses sample-specific audio information, although reliance on video is greater on
+CREMA-D and Kinetics-400 (Appendix E). On A VE,αA VM= 0 yields higher ACC and F1 than
+0.20 at the evaluated seed (Appendix F).
+4.4 MODALITYGAPVISUALIZATION
+We visualize the layer-wise evolution of CQFA’s modality gap using pairwise UMAP projections
+of normalized audio and visual embeddings, as shown in Figure 2. The complete method-level
+visualizations are provided in Appendix K. We further quantify the modality gap with complementary
+distance-based metrics in Table 3, with the complete quantitative results reported in Appendix H.
+Since the method-level statistics are computed from backbone embeddings, they mainly reflect the
+modality gap before high-level alignment and fusion. Table 3 shows that CQFA does not achieve the
+smallest backbone-level gap; for example, AUG has lower backbone-stage L2 and cosine distances,
+8
+
+=== PAGE 9 ===
+432
+433
+434
+435
+436
+437
+438
+439
+440
+441
+442
+443
+444
+445
+446
+447
+448
+449
+450
+451
+452
+453
+454
+455
+456
+457
+458
+459
+460
+461
+462
+463
+464
+465
+466
+467
+468
+469
+470
+471
+472
+473
+474
+475
+476
+477
+478
+479
+480
+481
+482
+483
+484
+485
+Under review as a conference paper at ICLR 2027
+Table 3: Selected modality-gap statistics on the CREMA-D dataset.
+Method L2 Cosine UMAP Distance UMAP Center
+MMCosine 1.417483 1.005165 14.791110 14.683060
+LFM 1.409830 0.994628 20.706594 20.601686
+AUG 1.392287 0.969682 17.344053 17.266756
+CQFA (Ours) 1.419171 1.007265 17.820297 17.378708
+Backbone(v/a)1.420660 1.009395 18.392397 17.875828
+Specialist queries(q a/qv)1.476505 1.092080 17.096130 16.977249
+A VC embeddings(gv/ga)0.711697 0.263736 0.527949 0.041841
+Fusion streams(q a
+f/qv
+f)0.289861 0.046931 0.115583 0.020094
+yet it does not achieve state-of-the-art classification performance. This suggests that reducing the raw
+embedding-level gap alone is insufficient to fully alleviate representation-level imbalance. In CQFA,
+the substantial gap reduction emerges after the A VC embeddings(gv/ga), where both the quantitative
+metrics and UMAP visualization become much more compact, indicating that task-aware contrastive
+alignment rather than backbone-level gap minimization is the key mechanism for releasing balanced
+multimodal representations.
+4.5 EFFECTIVEDIMENSIONANALYSIS
+Table 4: Selected Effective-Dimension Results.
+Methodd a
+e↑d v
+e |∆d|
+MMCosine217 23619
+LFM 157 203 46
+AUG 159 198 39
+CQFA (Ours)165 177 12
+Following Eq. (1), we compute the effective
+dimensionde as the minimum number of prin-
+cipal directions whose cumulative singular-
+value energy explains 99% of the represen-
+tation variance. Thus, de measures how
+many dominant directions are needed to ex-
+plain most of the feature space, while the
+inter-modal gap |∆d|=|d v
+e−d a
+e| reflects
+representation-level imbalance between audio
+and visual subspaces. Table 4 reports the ef-
+fective dimensions of different modalities and
+their gap for selected methods, with the complete results and cumulative explained-variance curves
+provided in Appendix I and Appendix J, respectively.
+As shown in Table 4, MMCosine obtains the highest effective dimensions for both modalities, which
+is consistent with its strong classification performance among the baselines. CQFA does not achieve
+the largest effective dimensions, nor does it obtain the smallest dimension gap in the complete
+comparison. Nevertheless, its effective dimensions and|∆d| remain in a moderate range compared
+with other methods, suggesting that CQFA alleviates representation-level imbalance to a certain
+extent rather than relying on maximal backbone dimensionality. Additional t-SNE visualizations are
+provided in Appendix L.
+5 CONCLUSION
+In this work, we studied modality imbalance as both representation-level subspace mismatch and
+fusion-level weak-modality underuse. We proposed CQFA, a query-guided framework that uses staged
+alignment and decoupled logits fusion to improve audio-visual learning. Experiments on CREMA-D
+and Kinetics-400 show that CQFA achieves strong performance, and the geometric analyses suggest
+that its gains are more closely tied to high-level cross-modal alignment and controlled fusion than to
+raw backbone-gap reduction alone.
+Limitation.Although CQFA shows strong results on the evaluated benchmarks, our experiments do
+not yet include broader comparisons across more audio-visual datasets. Future work will evaluate
+CQFA on a wider range of datasets to further verify its generalization ability under different data
+distributions and task settings.
+9
+
+=== PAGE 10 ===
+486
+487
+488
+489
+490
+491
+492
+493
+494
+495
+496
+497
+498
+499
+500
+501
+502
+503
+504
+505
+506
+507
+508
+509
+510
+511
+512
+513
+514
+515
+516
+517
+518
+519
+520
+521
+522
+523
+524
+525
+526
+527
+528
+529
+530
+531
+532
+533
+534
+535
+536
+537
+538
+539
+Under review as a conference paper at ICLR 2027
+AIUSE STATEMENT
+Generative AI tools were used to assist with method implementation, development of portions of
+the code, and analysis of experimental results, as well as manuscript editing, LaTeX formatting,
+and reference checking. The authors take responsibility for all AI-assisted content and the final
+manuscript.
+10
+
+=== PAGE 11 ===
+540
+541
+542
+543
+544
+545
+546
+547
+548
+549
+550
+551
+552
+553
+554
+555
+556
+557
+558
+559
+560
+561
+562
+563
+564
+565
+566
+567
+568
+569
+570
+571
+572
+573
+574
+575
+576
+577
+578
+579
+580
+581
+582
+583
+584
+585
+586
+587
+588
+589
+590
+591
+592
+593
+Under review as a conference paper at ICLR 2027
+REFERENCES
+Tadas Baltrušaitis, Chaitanya Ahuja, and Louis-Philippe Morency. Multimodal machine learning: A
+survey and taxonomy.IEEE Transactions on Pattern Analysis and Machine Intelligence, 41(2):
+423–443, 2019. doi: 10.1109/TPAMI.2018.2798607.
+Davide Caffagni, Federico Cocchi, Luca Barsellotti, Nicholas Moratelli, Sara Sarto, Lorenzo Baraldi,
+Lorenzo Baraldi, Marcella Cornia, and Rita Cucchiara. The revolution of multimodal large
+language models: A survey. InFindings of the Association for Computational Linguistics: ACL
+2024, pp. 13590–13618, 2024. doi: 10.18653/v1/2024.findings-acl.807.
+Houwei Cao, David G. Cooper, Michael K. Keutmann, Ruben C. Gur, Ani Nenkova, and Ragini
+Verma. CREMA-D: Crowd-sourced emotional multimodal actors dataset.IEEE Transactions on
+Affective Computing, 5(4):377–390, 2014. doi: 10.1109/TAFFC.2014.2336244.
+Abhra Chaudhuri, Anjan Dutta, Tu Bui, and Serban Georgescu. A closer look at multimodal
+representation collapse. InProceedings of the 42nd International Conference on Machine Learning,
+volume 267 ofProceedings of Machine Learning Research, pp. 7555–7577, 2025.
+Ringki Das and Thoudam Doren Singh. Multimodal sentiment analysis: A survey of methods, trends,
+and challenges.ACM Computing Surveys, 55(13s):270:1–270:38, 2023. doi: 10.1145/3586075.
+Yang Ding, Jing Yu, Bang Liu, Yue Hu, Mingxin Cui, and Qi Wu. MuKEA: Multimodal knowledge
+extraction and accumulation for knowledge-based visual question answering. InCVPR, pp. 5089–
+5098, 2022.
+Henghui Du, Guangyao Li, Chang Zhou, Chunjie Zhang, Alan Zhao, and Di Hu. Crab: A unified
+audio-visual scene understanding model with explicit cooperation. InCVPR, pp. 18804–18814,
+June 2025.
+Benjamin Elizalde, Soham Deshmukh, Mahmoud Al Ismail, and Huaming Wang. CLAP learning
+audio concepts from natural language supervision. InICASSP, pp. 1–5, 2023. doi: 10.1109/
+ICASSP49357.2023.10095889.
+Yunfeng Fan, Wenchao Xu, Haozhao Wang, Junxiao Wang, and Song Guo. PMR: Prototypical modal
+rebalance for multimodal learning. InCVPR, pp. 20029–20038, 2023.
+Yunfeng Fan, Wenchao Xu, Haozhao Wang, Junhong Liu, and Song Guo. Detached and interactive
+multimodal learning. InACM MM, pp. 5470–5478, 2024. doi: 10.1145/3664647.3680697.
+Chengxiang Huang, Yake Wei, Zequn Yang, and Di Hu. Adaptive unimodal regulation for balanced
+multimodal information acquisition. InCVPR, pp. 25854–25863, 2025.
+Qing-Yuan Jiang, Longfei Huang, and Yang Yang. Rethinking multimodal learning from the
+perspective of mitigating classification ability disproportion. InAdvances in Neural Information
+Processing Systems, volume 38, 2025. doi: 10.52202/085713-4315.
+Li Jing, Pascal Vincent, Yann LeCun, and Yuandong Tian. Understanding dimensional collapse in
+contrastive self-supervised learning. InICLR, 2022.
+Will Kay, Joao Carreira, Karen Simonyan, Brian Zhang, Chloe Hillier, Sudheendra Vijayanarasimhan,
+Fabio Viola, Tim Green, Trevor Back, Paul Natsev, et al. The Kinetics human action video dataset.
+arXiv preprint arXiv:1705.06950, 2017.
+Hong Li, Xingyu Li, Pengbo Hu, Yinuo Lei, Chunxiao Li, and Yi Zhou. Boosting multi-modal model
+performance with adaptive gradient modulation. InProceedings of the IEEE/CVF International
+Conference on Computer Vision, pp. 22214–22224, 2023.
+Victor Weixin Liang, Yuhui Zhang, Yongchan Kwon, Serena Yeung, and James Y . Zou. Mind the gap:
+Understanding the modality gap in multi-modal contrastive representation learning. InAdvances
+in Neural Information Processing Systems, volume 35, 2022. doi: 10.52202/068431-1280.
+Xiaoyu Ma, Hao Chen, and Yongjian Deng. Improving multimodal learning balance and sufficiency
+through data remixing. InProceedings of the 42nd International Conference on Machine Learning,
+volume 267 ofProceedings of Machine Learning Research, pp. 41827–41836, 2025.
+11
+
+=== PAGE 12 ===
+594
+595
+596
+597
+598
+599
+600
+601
+602
+603
+604
+605
+606
+607
+608
+609
+610
+611
+612
+613
+614
+615
+616
+617
+618
+619
+620
+621
+622
+623
+624
+625
+626
+627
+628
+629
+630
+631
+632
+633
+634
+635
+636
+637
+638
+639
+640
+641
+642
+643
+644
+645
+646
+647
+Under review as a conference paper at ICLR 2027
+Xiaokang Peng, Yake Wei, Andong Deng, Dong Wang, and Di Hu. Balanced multimodal learning
+via on-the-fly gradient modulation. InCVPR, pp. 8238–8247, 2022.
+Alec Radford, Jong Wook Kim, Chris Hallacy, Aditya Ramesh, Gabriel Goh, Sandhini Agarwal,
+Girish Sastry, Amanda Askell, Pamela Mishkin, Jack Clark, Gretchen Krueger, and Ilya Sutskever.
+Learning transferable visual models from natural language supervision. InProceedings of the 38th
+International Conference on Machine Learning, volume 139 ofProceedings of Machine Learning
+Research, pp. 8748–8763, 2021.
+Yapeng Tian, Jing Shi, Bochen Li, Zhiyao Duan, and Chenliang Xu. Audio-visual event localization
+in unconstrained videos. InECCV, pp. 247–263, 2018.
+Tianshi Wang, Fengling Li, Lei Zhu, Jingjing Li, Zheng Zhang, and Heng Tao Shen. Cross-modal
+retrieval: A systematic review of methods and future directions.Proceedings of the IEEE, 112(11):
+1716–1754, 2024. doi: 10.1109/JPROC.2024.3525147.
+Shicai Wei, Chunbo Luo, and Yang Luo. Boosting multimodal learning via disentangled gradient
+learning. InICCV, pp. 22879–22888, 2025a.
+Yake Wei and Di Hu. MMPareto: Boosting multimodal learning with innocent unimodal assistance. In
+Proceedings of the 41st International Conference on Machine Learning, volume 235 ofProceedings
+of Machine Learning Research, pp. 52559–52572, 2024.
+Yake Wei, Ruoxuan Feng, Zihe Wang, and Di Hu. Enhancing multimodal cooperation via sample-
+level modality valuation. InCVPR, pp. 27338–27347, 2024.
+Yake Wei, Di Hu, Henghui Du, and Ji-Rong Wen. On-the-fly modulation for balanced multimodal
+learning.IEEE Transactions on Pattern Analysis and Machine Intelligence, 47(1):469–485, 2025b.
+doi: 10.1109/TPAMI.2024.3468315.
+Kaixuan Wu, Xinde Li, Xinling Li, Chuanfei Hu, and Guoliang Wu. A VQACL: A novel benchmark
+for audio-visual question answering continual learning. InCVPR, pp. 3252–3261, 2025.
+Ruize Xu, Ruoxuan Feng, Shi-Xiong Zhang, and Di Hu. MMCosine: Multi-modal cosine loss
+towards balanced audio-visual fine-grained learning. InICASSP, pp. 1–5. IEEE, 2023.
+Shaoxuan Xu, Menglu Cui, Chengxiang Huang, Hongfa Wang, and Di Hu. BalanceBenchmark: A
+survey for multimodal imbalance learning.arXiv preprint arXiv:2502.10816, 2025.
+Yang Yang, Fengqiang Wan, Qing-Yuan Jiang, and Yi Xu. Facilitating multimodal classification
+via dynamically learning modality gap. InAdvances in Neural Information Processing Systems,
+volume 37, pp. 62108–62122, 2024.
+Lingjie Yi, Raphael Douady, and Chao Chen. Decipher the modality gap in multimodal contrastive
+learning: From convergent representations to pairwise alignment.arXiv preprint arXiv:2510.03268,
+2025.
+Shukang Yin, Chaoyou Fu, Sirui Zhao, Ke Li, Xing Sun, Tong Xu, and Enhong Chen. A survey
+on multimodal large language models.National Science Review, 11(12):nwae403, 2024. doi:
+10.1093/nsr/nwae403.
+Feng Yu, Xiangyu Wu, Yang Yang, and Jianfeng Lu. Multimodal classification via total correlation
+maximization. InICLR, 2026.
+Qingyang Zhang, Haitao Wu, Changqing Zhang, Qinghua Hu, Huazhu Fu, Joey Tianyi Zhou, and
+Xi Peng. Provable dynamic fusion for low-quality multimodal data. InProceedings of the 40th
+International Conference on Machine Learning, volume 202 ofProceedings of Machine Learning
+Research, pp. 41753–41769, 2023.
+Xiaohui Zhang, Jaehong Yoon, Mohit Bansal, and Huaxiu Yao. Multimodal representation learning
+by alternating unimodal adaptation. InCVPR, pp. 27456–27466, 2024a.
+Yuhui Zhang, Elaine Sui, and Serena Yeung-Levy. Connect, collapse, corrupt: Learning cross-modal
+tasks with uni-modal data. InICLR, 2024b.
+Ying Zhou, Xuefeng Liang, Shiquan Zheng, Huijun Xuan, and Takatsune Kumada. Adaptive mask
+co-optimization for modal dependence in multimodal learning. InICASSP, pp. 1–5, 2023.
+12
+
+=== PAGE 13 ===
+648
+649
+650
+651
+652
+653
+654
+655
+656
+657
+658
+659
+660
+661
+662
+663
+664
+665
+666
+667
+668
+669
+670
+671
+672
+673
+674
+675
+676
+677
+678
+679
+680
+681
+682
+683
+684
+685
+686
+687
+688
+689
+690
+691
+692
+693
+694
+695
+696
+697
+698
+699
+700
+701
+Under review as a conference paper at ICLR 2027
+A IMPLEMENTATIONDETAILS
+Table 5: Detailed implementation settings for CQFA.
+Item Setting
+Visual backbone CLIP ViT-B/32 (openai/clip-vit-base-patch32); vision-
+token hidden size 768 and pooled projection size 512.
+Audio backbone CLAP HTS-AT (laion/clap-htsat-unfused); audio-token
+hidden size 768 and pooled projection size 512.
+Visual input 16 RGB frames per video, with each frame resized to 3×224×224 .
+Audio input 48 kHz waveform, cropped or padded to 10 s and converted into 64-
+bin log-mel features.
+Model typedlip_bf3_logitsfusion.
+Shared representation Visual, audio, and text features are projected to hidden dimension
+D= 512.
+LoRA adaptation Rank 4, alpha 16, dropout 0.01, and no bias; CLIP uses
+q_proj/v_proj, CLAP uses query/value, and text encoders
+are frozen.
+Q-Former 4 layers, 8 attention heads, 8 visual expert queries, 8 audio expert
+queries, and 4 fusion queries.
+Logits fusion Two fusion streams are used, and the final prediction sums the CLIP-
+space and CLAP-space similarity logits.
+Training objectivesα A VC= 1.0,α A VM= 0.5, andα CLS = 1.0.
+Contrastive temperature 0.07.
+ITM negative sampling Hard negative sampling.
+Optimization Adam optimizer with learning rate 1×10 −4 and StepLR scheduler
+with step size 10 and decay factor 0.1.
+Training schedule 30 epochs, batch size 32, and random seed 42.
+Hardware NVIDIA RTX 4090 GPU.
+Evaluation metrics Accuracy (ACC) and F1 score.
+B THREE-STAGETRAININGDETAILS
+Stage 1: AVCStage 2: AVMStage 3: CLS
+Q-FormerMask Self-attention
+Cross-attention
+Shared FFN
+Projv Proja
+Q-FormerMask Self-attention
+Cross-attention
+Shared FFN
+AVM Head
+Q-FormerMask Self-attention
+Cross-attention
+Shared FFN
+Qv Qa
+gtgtgagv
+Qv Qa
+LossAVC LossAVM
+Qfv aQfa
+Fused_ProjvFused_Proja
+Logits FusionLossCLS
+VVVAAA VVVAAAVVVAAA
+Mask Matrix Mask Matrix Mask Matrix
+Figure 3: Three-stage training in CQFA.
+13
+
+=== PAGE 14 ===
+702
+703
+704
+705
+706
+707
+708
+709
+710
+711
+712
+713
+714
+715
+716
+717
+718
+719
+720
+721
+722
+723
+724
+725
+726
+727
+728
+729
+730
+731
+732
+733
+734
+735
+736
+737
+738
+739
+740
+741
+742
+743
+744
+745
+746
+747
+748
+749
+750
+751
+752
+753
+754
+755
+Under review as a conference paper at ICLR 2027
+C OBJECTIVECONTRIBUTIONS
+We evaluate the contribution of each training objective while holding the CQFA architecture fixed.
+This experiment isolates objective-level effects and is therefore conceptually distinct from the
+architectural comparisons in Section 4.3.
+Table 6: Objective ablation of CQFA on the three evaluation benchmarks.
+Variant CREMA-D A VE Kinetics-400
+ACC F1 ACC F1 ACC F1
+Full CQFA 89.94 89.9495.52 95.87 71.8571.66
+w/o A VC 85.74 85.67 95.27 95.54 71.25 70.97
+w/o A VM 89.34 89.3096.02 96.26 71.8871.62
+w/o CLS 18.77 15.30 1.99 1.40 0.33 0.04
+As reported in Table 6, removing A VC consistently reduces both ACC and F1, with the largest degrada-
+tion observed on CREMA-D. This result supports the contribution of contrastive and prototype-based
+supervision to modality-specific representation learning. The effect of A VM is less uniform: its re-
+moval decreases performance on CREMA-D, improves both metrics on A VE, and produces a marginal
+ACC increase but a slight F1 decrease on Kinetics-400. A VM therefore provides dataset-dependent
+rather than uniformly positive benefits. The near-random performance of w/o CLS establishes only
+that A VC and A VM cannot substitute for task-level supervision. It does not provide evidence for
+query-role partitioning, directional fusion streams, or logit-level aggregation; these components are
+evaluated using classification-preserving controls in Section 4.3.
+D QUERYSOURCE ANDFUSIONLEVEL
+We further disentangle the classification-query source from the aggregation level through the2×2
+factorial comparison in Table 7.
+Table 7: Factorial comparison of classification-query source and fusion level. Results are reported as
+ACC/F1.
+Query Fusion level CREMA-D A VE Kinetics-400
+Fusion Logits89.94/89.94 94.03/94.35 71.85/71.66
+Fusion Features 87.99/87.9394.03/94.4870.11/69.83
+Expert Logits 88.14/88.11 93.53/93.79 69.30/69.03
+Expert Features 87.99/87.94 93.78/94.35 69.16/69.03
+Holding the query source fixed to fusion queries, logit-level aggregation improves ACC over feature-
+level aggregation by 1.95 points on CREMA-D and 1.74 points on Kinetics-400, while producing
+identical ACC on A VE. Conversely, under logit-level aggregation, fusion queries outperform expert
+queries by 1.80, 0.50, and 2.55 ACC points on CREMA-D, A VE, and Kinetics-400, respectively.
+The magnitude of each effect consequently depends on the setting of the other factor, indicating an
+interaction between query source and fusion level rather than two universally additive contributions.
+E UNIMODALCAPABILITY ANDDECISION-LEVELUTILIZATION
+Representation-space geometry alone is insufficient to establish whether the final classifier uses
+sample-specific information from the weaker modality. We therefore first estimate unimodal capability
+using independently trained audio-only and video-only models (Table 8). Audio is the weaker
+modality on all three benchmarks, with audio–video ACC gaps of 14.27, 1.49, and 41.20 points
+on CREMA-D, A VE, and Kinetics-400, respectively. Nevertheless, the audio-only models remain
+substantially above chance, confirming that the weaker modality retains discriminative information.
+14
+
+=== PAGE 15 ===
+756
+757
+758
+759
+760
+761
+762
+763
+764
+765
+766
+767
+768
+769
+770
+771
+772
+773
+774
+775
+776
+777
+778
+779
+780
+781
+782
+783
+784
+785
+786
+787
+788
+789
+790
+791
+792
+793
+794
+795
+796
+797
+798
+799
+800
+801
+802
+803
+804
+805
+806
+807
+808
+809
+Under review as a conference paper at ICLR 2027
+Table 8: Performance of independently trained unimodal models and the controlled CQFA baseline.
+Results are reported as ACC/F1.
+Dataset Audio-only Video-only CQFA
+CREMA-D 63.06/62.52 77.33/77.19 89.94/89.94
+A VE 85.57/83.06 87.06/87.72 94.03/94.35
+Kinetics-400 23.64/22.20 64.84/64.51 71.85/71.66
+To assess whether CQFA exploits this information, we keep the trained checkpoint fixed and indepen-
+dently permute either audio or video across samples. For each modality, we use five fixed-point-free
+dataset-level permutations and perform no retraining. We quantify the resulting decision-level reliance
+as
+Ca = ACCpaired−Eπ[ACC(aπ,v)], C v = ACCpaired−Eπ[ACC(a,vπ)],(21)
+whereπ denotes a fixed-point-free permutation. Larger values indicate greater sensitivity to disrupting
+the sample-wise correspondence of the associated modality.
+Table 9: Fixed-checkpoint modality-permutation analysis. Shuffled results are reported as
+mean±standard deviation over five fixed-point-free permutations.
+Dataset Paired ACC Audio shuffled Video shuffledC a Cv
+CREMA-D 89.9463.54±1.87 31.02±2.6026.40 58.92
+A VE 94.0341.59±2.03 46.97±1.2452.44 47.06
+Kinetics-400 71.8558.67±0.19 1.73±0.0613.18 70.12
+Audio permutation reduces ACC on every dataset, providing direct evidence that CQFA uses sample-
+specific information from the weaker modality. The substantially largerCv values on CREMA-D
+and Kinetics-400 indicate stronger reliance on video correspondence, particularly on Kinetics-400,
+whereas the similar Ca and Cv values on A VE indicate a more balanced sensitivity to the two
+modalities. These results characterize prediction-level reliance under a distribution-shift intervention;
+they neither constitute a causal decomposition of modality contributions under the original data
+distribution nor directly measure interference among fusion neurons.
+F AVM-WEIGHTSENSITIVITY ONAVE
+Finally, we examine whether the A VE results are sensitive to the A VM objective weight. We vary
+onlyαA VM while holding the architecture, optimization protocol, αA VC = 1.0, and αCLS = 1.8
+fixed; each configuration is trained independently.
+Table 10: Sensitivity to the A VM objective weight on A VE. Each configuration is trained indepen-
+dently.
+αA VM Best epoch ACC F1 mAP
+0.00496.02 96.24 99.00
+0.10 8 95.52 95.91 98.33
+0.20 (default) 13 95.27 95.71 97.87
+0.25 6 95.27 95.58 98.62
+0.50 4 95.27 95.45 98.97
+At the evaluated seed, settingαA VM= 0 improves ACC and F1 by 0.75 and 0.53 points, respectively,
+relative to the default weight of 0.20; none of the nonzero settings attains comparable performance.
+Together with the video-led single-stream result in Table 2, this finding indicates that A VE is sensitive
+to both objective weighting and routing configuration. Because the sweep is based on a single seed
+and validation-set measurements, it does not establish statistically persistent negative transfer or
+identify a unique explanation for the observed behavior.
+15
+
+=== PAGE 16 ===
+810
+811
+812
+813
+814
+815
+816
+817
+818
+819
+820
+821
+822
+823
+824
+825
+826
+827
+828
+829
+830
+831
+832
+833
+834
+835
+836
+837
+838
+839
+840
+841
+842
+843
+844
+845
+846
+847
+848
+849
+850
+851
+852
+853
+854
+855
+856
+857
+858
+859
+860
+861
+862
+863
+Under review as a conference paper at ICLR 2027
+G PRINCIPAL-ANGLE-BASEDMODALITYGAPANALYSIS
+This section measures the angular discrepancy between audio and visual representation subspaces
+as a structural indicator of modality gap. Table 11 reports the minimum nonzero principal angle for
+different methods and for layer-wise CQFA representations.
+Table 11: Minimum nonzero principal-angle statistics on the CREMA-D dataset.
+Entryθ nz
+min (rad)↓θ nz
+min (deg)↓
+OGM 0.349 19.97
+AGM 0.412 23.63
+PMR 0.374 21.42
+MMCosine0.104 5.98
+QMF 0.313 17.93
+MMPareto 0.303 17.33
+LFM 0.283 16.21
+MLA 0.286 16.41
+DIMML 0.242 13.89
+AUG 0.325 18.64
+Remix 0.259 14.81
+DGL 0.389 22.31
+InfoReg 0.398 22.80
+TCMax 0.252 14.46
+CQFA (Ours)0.347 19.89
+Backbone (v/a) 0.349 20.01
+Projected tokens (v/a) 0.355 20.32
+Specialist queries (qa/qv) 0.414 23.72
+A VC embeddings (gv/ga) 0.083 4.77
+Fusion streams (qfa/qfv) 0.045 2.60
+The results show that CQFA does not reduce the subspace angle at the raw embedding stage: its
+backbone-level angle remains larger than several baselines, indicating that the initial backbone
+representations are not the main source of its final gain. However, the layer-wise CQFA results
+show a clear reduction after the A VC embeddings(gv/ga), where the angle decreases to 4.77◦. This
+indicates that CQFA reduces the modality gap primarily through the subsequent task-aware A VC
+alignment stage rather than through backbone-level embedding alignment alone.
+16
+
+=== PAGE 17 ===
+864
+865
+866
+867
+868
+869
+870
+871
+872
+873
+874
+875
+876
+877
+878
+879
+880
+881
+882
+883
+884
+885
+886
+887
+888
+889
+890
+891
+892
+893
+894
+895
+896
+897
+898
+899
+900
+901
+902
+903
+904
+905
+906
+907
+908
+909
+910
+911
+912
+913
+914
+915
+916
+917
+Under review as a conference paper at ICLR 2027
+H COMPLETEMODALITY-GAPSTATISTICS
+Table 12: Complete modality-gap statistics on the CREMA-D dataset.
+Method L2 Cosine UMAP Distance UMAP Center
+OGM 1.408391 0.992246 19.046309 18.885324
+AGM 1.417963 1.005683 14.388806 14.137403
+PMR 1.406326 0.989707 17.362234 17.189222
+MMCosine 1.417483 1.005165 14.791110 14.683060
+QMF 1.412988 0.999114 16.017960 15.868993
+MMPareto 1.417956 1.005728 18.995197 18.857359
+LFM 1.409830 0.994628 20.706594 20.601686
+MLA 1.420102 1.009273 17.066839 16.981440
+DIMML 1.417675 1.005854 16.741369 16.552137
+AUG 1.392287 0.969682 17.344053 17.266756
+Remix 1.415861 1.002840 17.958792 17.876984
+DGL 1.405201 0.988407 16.339041 16.248043
+InfoReg 1.410580 0.995524 18.193207 18.083967
+TCMax 1.414488 1.001186 21.979671 21.924444
+CQFA (Ours) 1.419171 1.007265 17.820297 17.378708
+Backbone(v/a)1.420660 1.009395 18.392397 17.875828
+Specialist queries(q a/qv)1.476505 1.092080 17.096130 16.977249
+A VC embeddings(gv/ga)0.711697 0.263736 0.527949 0.041841
+Fusion streams(q a
+f/qv
+f)0.289861 0.046931 0.115583 0.020094
+I COMPLETEEFFECTIVE-DIMENSIONSTATISTICS
+Table 13: Complete effective dimensions measured at 99% variance for audio and video backbone
+representations.
+Methodd a
+e↑d v
+e |∆d|
+OGM 165 179 14
+AGM 100 224 124
+PMR 155 174 19
+MMCosine217 23619
+QMF 180 184 4
+MMPareto 172 194 22
+LFM 157 203 46
+MLA 182 184 2
+DIMML 200 193 7
+AUG 159 198 39
+Remix 193 1930
+DGL 165 156 9
+InfoReg 167 154 13
+TCMax 178 207 29
+CQFA (Ours)165 177 12
+17
+
+=== PAGE 18 ===
+918
+919
+920
+921
+922
+923
+924
+925
+926
+927
+928
+929
+930
+931
+932
+933
+934
+935
+936
+937
+938
+939
+940
+941
+942
+943
+944
+945
+946
+947
+948
+949
+950
+951
+952
+953
+954
+955
+956
+957
+958
+959
+960
+961
+962
+963
+964
+965
+966
+967
+968
+969
+970
+971
+Under review as a conference paper at ICLR 2027
+J COMPLETECUMULATIVEEXPLAINED-VARIANCECURVES
+0 100 200 300 400 500
+Singular Value Index
+0.0
+0.2
+0.4
+0.6
+0.8
+1.0Cumulative Explained Variance
+CLIP vision (eff_dim=179)
+CLAP audio (eff_dim=165)
+99% variance
+(a) OGM
+0 100 200 300 400 500
+Singular Value Index
+0.0
+0.2
+0.4
+0.6
+0.8
+1.0Cumulative Explained Variance
+CLIP vision (eff_dim=224)
+CLAP audio (eff_dim=100)
+99% variance (b) AGM
+0 100 200 300 400 500
+Singular Value Index
+0.0
+0.2
+0.4
+0.6
+0.8
+1.0Cumulative Explained Variance
+CLIP vision (eff_dim=174)
+CLAP audio (eff_dim=155)
+99% variance (c) PMR
+0 100 200 300 400 500
+Singular Value Index
+0.0
+0.2
+0.4
+0.6
+0.8
+1.0Cumulative Explained Variance
+CLIP vision (eff_dim=236)
+CLAP audio (eff_dim=217)
+99% variance
+(d) MMCosine
+0 100 200 300 400 500
+Singular Value Index
+0.0
+0.2
+0.4
+0.6
+0.8
+1.0Cumulative Explained Variance
+CLIP vision (eff_dim=184)
+CLAP audio (eff_dim=180)
+99% variance (e) QMF
+0 100 200 300 400 500
+Singular Value Index
+0.0
+0.2
+0.4
+0.6
+0.8
+1.0Cumulative Explained Variance
+CLIP vision (eff_dim=194)
+CLAP audio (eff_dim=172)
+99% variance (f) MMPareto
+0 100 200 300 400 500
+Singular Value Index
+0.0
+0.2
+0.4
+0.6
+0.8
+1.0Cumulative Explained Variance
+CLIP vision (eff_dim=203)
+CLAP audio (eff_dim=157)
+99% variance
+(g) LFM
+0 100 200 300 400 500
+Singular Value Index
+0.0
+0.2
+0.4
+0.6
+0.8
+1.0Cumulative Explained Variance
+CLIP vision (eff_dim=184)
+CLAP audio (eff_dim=182)
+99% variance (h) MLA
+0 100 200 300 400 500
+Singular Value Index
+0.0
+0.2
+0.4
+0.6
+0.8
+1.0Cumulative Explained Variance
+CLIP vision (eff_dim=193)
+CLAP audio (eff_dim=200)
+99% variance (i) DIMML
+Figure 4: Complete cumulative explained-variance curves of audio and visual backbone representa-
+tions, Part I.
+0 100 200 300 400 500
+Singular Value Index
+0.0
+0.2
+0.4
+0.6
+0.8
+1.0Cumulative Explained Variance
+CLIP vision (eff_dim=198)
+CLAP audio (eff_dim=159)
+99% variance
+(a) AUG
+0 100 200 300 400 500
+Singular Value Index
+0.0
+0.2
+0.4
+0.6
+0.8
+1.0Cumulative Explained Variance
+CLIP vision (eff_dim=193)
+CLAP audio (eff_dim=193)
+99% variance (b) ReMix
+0 100 200 300 400 500
+Singular Value Index
+0.0
+0.2
+0.4
+0.6
+0.8
+1.0Cumulative Explained Variance
+CLIP vision (eff_dim=156)
+CLAP audio (eff_dim=165)
+99% variance (c) DGL
+0 100 200 300 400 500
+Singular Value Index
+0.0
+0.2
+0.4
+0.6
+0.8
+1.0Cumulative Explained Variance
+CLIP vision (eff_dim=154)
+CLAP audio (eff_dim=167)
+99% variance
+(d) InfoReg
+0 100 200 300 400 500
+Singular Value Index
+0.0
+0.2
+0.4
+0.6
+0.8
+1.0Cumulative Explained Variance
+CLIP vision (eff_dim=207)
+CLAP audio (eff_dim=178)
+99% variance (e) TCMax
+0 100 200 300 400 500
+Singular Value Index
+0.0
+0.2
+0.4
+0.6
+0.8
+1.0Cumulative Explained Variance
+CLIP vision (eff_dim=177)
+CLAP audio (eff_dim=165)
+99% variance (f) CQFA (Ours)
+Figure 5: Complete cumulative explained-variance curves of audio and visual backbone representa-
+tions, Part II.
+18
+
+=== PAGE 19 ===
+972
+973
+974
+975
+976
+977
+978
+979
+980
+981
+982
+983
+984
+985
+986
+987
+988
+989
+990
+991
+992
+993
+994
+995
+996
+997
+998
+999
+1000
+1001
+1002
+1003
+1004
+1005
+1006
+1007
+1008
+1009
+1010
+1011
+1012
+1013
+1014
+1015
+1016
+1017
+1018
+1019
+1020
+1021
+1022
+1023
+1024
+1025
+Under review as a conference paper at ICLR 2027
+K ADDITIONALMODALITYGAPVISUALIZATIONS
+For completeness, we provide the full set of pairwise UMAP visualizations. The methods are ordered
+consistently with Table 1 whenever applicable.
+−5 0 5 10 15
+2
+4
+6
+8
+10
+video
+audio
+(a) OGM
+−5 0 5 10 15
+0
+1
+2
+3
+4
+5 video
+audio (b) AGM
+−5 0 5 10 15 20
+0
+2
+4
+6
+8
+10 video
+audio (c) PMR
+−5 0 5 10 15
+6
+7
+8
+9
+10
+11
+12 video
+audio
+(d) MMCosine
+ (e) QMF
+ (f) MMPareto
+(g) LFM
+ (h) MLA
+ (i) DIMML
+Figure 6: Complete pairwise UMAP visualizations of normalized backbone embeddings on the
+CREMA-D dataset, Part I. Vision features are shown in red, Audio features in blue, and gray lines
+connect paired samples.
+19
+
+=== PAGE 20 ===
+1026
+1027
+1028
+1029
+1030
+1031
+1032
+1033
+1034
+1035
+1036
+1037
+1038
+1039
+1040
+1041
+1042
+1043
+1044
+1045
+1046
+1047
+1048
+1049
+1050
+1051
+1052
+1053
+1054
+1055
+1056
+1057
+1058
+1059
+1060
+1061
+1062
+1063
+1064
+1065
+1066
+1067
+1068
+1069
+1070
+1071
+1072
+1073
+1074
+1075
+1076
+1077
+1078
+1079
+Under review as a conference paper at ICLR 2027
+−5 0 5 10 15
+3
+4
+5
+6
+7
+8
+9 video
+audio
+(a) AUG
+−5.0 −2.5 0.0 2.5 5.0 7.5 10.0 12.5
+0
+2
+4
+6
+8
+10 video
+audio (b) Remix
+−5 0 5 10 15
+2
+4
+6
+8
+10
+12 video
+audio (c) DGL
+−5 0 5 10 15
+2
+4
+6
+8
+10
+video
+audio
+(d) InfoReg
+ (e) TCMax
+ (f) CQFA (Ours)
+Figure 7: Complete pairwise UMAP visualizations of normalized backbone embeddings on the
+CREMA-D test set, Part II.
+L ADDITIONAL T-SNE VISUALIZATIONS
+For completeness, we provide the full set of t-SNE visualizations. The methods are ordered consis-
+tently with Table 1 whenever applicable.
+20
+
+=== PAGE 21 ===
+1080
+1081
+1082
+1083
+1084
+1085
+1086
+1087
+1088
+1089
+1090
+1091
+1092
+1093
+1094
+1095
+1096
+1097
+1098
+1099
+1100
+1101
+1102
+1103
+1104
+1105
+1106
+1107
+1108
+1109
+1110
+1111
+1112
+1113
+1114
+1115
+1116
+1117
+1118
+1119
+1120
+1121
+1122
+1123
+1124
+1125
+1126
+1127
+1128
+1129
+1130
+1131
+1132
+1133
+Under review as a conference paper at ICLR 2027
+(a) OGM
+ (b) AGM
+ (c) PMR
+(d) MMCosine
+ (e) QMF
+ (f) MMPareto
+(g) LFM
+ (h) MLA
+ (i) DIMML
+Figure 8: Complete t-SNE visualizations of normalized backbone embeddings on the CREMA-D test
+set, Part I.
+21
+
+=== PAGE 22 ===
+1134
+1135
+1136
+1137
+1138
+1139
+1140
+1141
+1142
+1143
+1144
+1145
+1146
+1147
+1148
+1149
+1150
+1151
+1152
+1153
+1154
+1155
+1156
+1157
+1158
+1159
+1160
+1161
+1162
+1163
+1164
+1165
+1166
+1167
+1168
+1169
+1170
+1171
+1172
+1173
+1174
+1175
+1176
+1177
+1178
+1179
+1180
+1181
+1182
+1183
+1184
+1185
+1186
+1187
+Under review as a conference paper at ICLR 2027
+(a) AUG
+ (b) ReMix
+ (c) DGL
+(d) InfoReg
+ (e) TCMax
+ (f) CQFA (Ours)
+Figure 9: Complete t-SNE visualizations of normalized backbone embeddings on the CREMA-D test
+set, Part II.
+22

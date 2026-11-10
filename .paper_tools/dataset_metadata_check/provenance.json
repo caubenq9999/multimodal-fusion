@@ -1,0 +1,34 @@
+{
+  "dataset_repo": "VLM2Vec/MSR-VTT",
+  "dataset_revision": "947b139d0c591235a3f311e45a31a88461bad0d2",
+  "model_revisions": {
+    "Salesforce/blip-image-captioning-base": "82a37760796d32b1411fe092ab5d4e227313294b",
+    "openai/clip-vit-base-patch32": "3d74acf9a28c67741b2f4f2ea7635f0aaf6f0268"
+  },
+  "eligible_count": 9000,
+  "sampling": "uniform without replacement; seed fixed",
+  "selected_video_GB": 0.114131956,
+  "category_counts": {
+    "3": 67,
+    "11": 12,
+    "9": 30,
+    "13": 44,
+    "0": 33,
+    "16": 38,
+    "17": 15,
+    "2": 23,
+    "19": 12,
+    "6": 15,
+    "14": 22,
+    "10": 25,
+    "7": 38,
+    "15": 8,
+    "18": 28,
+    "4": 24,
+    "8": 17,
+    "5": 10,
+    "1": 19,
+    "12": 20
+  },
+  "protocol": "Custom subset of train_9k; train-only candidates for fitting; shared index for evaluation"
+}

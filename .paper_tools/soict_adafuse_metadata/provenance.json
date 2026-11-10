@@ -1,0 +1,35 @@
+{
+  "dataset_repo": "VLM2Vec/MSR-VTT",
+  "dataset_revision": "947b139d0c591235a3f311e45a31a88461bad0d2",
+  "model_revisions": {
+    "internlm/CapRL-Qwen3VL-4B": "1db1c1dd241e2df95b59846a94cdee5300de9ef9",
+    "jinaai/jina-embeddings-v5-omni-small": "950200abde3a3bcf3d5bdfe5d28fb5bb5e7dfbb0",
+    "Qwen/Qwen3-0.6B": "c1899de289a04d12100db370d81485cdf75e47ca"
+  },
+  "eligible_count": 9000,
+  "sampling": "uniform without replacement; seed fixed",
+  "selected_video_GB": 0.114131956,
+  "category_counts": {
+    "3": 67,
+    "11": 12,
+    "9": 30,
+    "13": 44,
+    "0": 33,
+    "16": 38,
+    "17": 15,
+    "2": 23,
+    "19": 12,
+    "6": 15,
+    "14": 22,
+    "10": 25,
+    "7": 38,
+    "15": 8,
+    "18": 28,
+    "4": 24,
+    "8": 17,
+    "5": 10,
+    "1": 19,
+    "12": 20
+  },
+  "protocol": "Custom subset of train_9k; train-only candidates for fitting; shared index for evaluation"
+}

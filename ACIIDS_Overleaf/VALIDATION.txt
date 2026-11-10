@@ -1,0 +1,2 @@
+Source checks passed: 7 numbered sections; all input files present; all 6 citations resolved; environments balanced; private paper absent.
+PDF compilation not performed: no installed TeX compiler; portable compiler download did not complete.

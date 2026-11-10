@@ -1,0 +1,26 @@
+\section{Related Work}
+
+\subsection{Text-to-Video Retrieval}
+
+Contrastive image--text pretraining learns visual representations through natural-language supervision, as demonstrated by CLIP \cite{radford2021clip}. CLIP4Clip investigates transferring this capability to video--text retrieval and studies choices for modeling frame information and temporal relationships \cite{luo2021clip4clip}. These methods motivate using pretrained encoders as retrieval backbones. Our initial experiment holds the encoders and video preprocessing fixed so that differences can be attributed to the fusion policy rather than to changes in visual representation learning.
+
+Video retrieval can also draw on multiple sources of evidence. Collaborative Experts aggregates pretrained representations and considers cues including appearance, motion, speech, and scene text \cite{liu2019experts}. This work is relevant to combining heterogeneous features, while the present experiment isolates a narrower pair of branches: visual evidence and descriptions generated from that same visual content. Since generated captions derive from the video, they should not be treated as statistically independent observations. Their retrieval value depends on the information preserved, reformulated, or lost during generation.
+
+\subsection{Rank Fusion and Fixed Weighting}
+
+RRF aggregates ranked lists using reciprocal rank contributions \cite{cormack2009rrf}. Its use of ranks avoids requiring raw similarity scores from different retrieval systems to share a common numerical scale. This property is useful when the visual and caption branches use different encoders or have different score distributions. However, rank fusion also discards score magnitude information, including differences between a narrow and a wide margin at the top of a list.
+
+Our fixed controls include equal-weight RRF and a weighted variant whose single coefficient is selected using validation queries. The latter is essential to distinguish the value of adaptation from the simpler benefit of selecting a better average weight. Candidate depth, rank offset, aggregation unit, and tie handling are held constant across the primary comparisons. Score-level fusion is treated as a separate comparison if introduced, because changing both the weight predictor and the score transformation would confound their effects.
+
+\subsection{Query-Conditioned Expert Weighting}
+
+Mixture-of-Embedding-Experts (MEE) learns separate embedding experts for different video descriptors and predicts their combination weights from the input text \cite{miech2018mee}. Its formulation demonstrates that text-dependent weighting is established prior work in video retrieval. Collaborative Experts further explores the combination of heterogeneous pretrained representations \cite{liu2019experts}. Consequently, using an MLP or a softmax gate does not, on its own, establish an architectural novelty claim.
+
+Our planned comparison examines whether query conditioning remains useful when the branches are frozen and one branch indexes automatically generated descriptions. Semantic routing imposes a coarse, interpretable structure on the weighting function, while a linear gate and an MLP predict weights directly from query embeddings. Comparing these alternatives with the same training data and retrieval lists helps separate the effects of query conditioning, model capacity, and supervision. The study is therefore positioned as an investigation of when and how adaptation helps, rather than as the first query-dependent multimodal retrieval model.
+
+\subsection{Evaluation Scope}
+
+MSR-VTT provides a video-description resource with 10,000 clips and approximately 200,000 sentence annotations \cite{xu2016msrvtt}. Its descriptions can support text-to-video retrieval, but a reproducible experiment must specify which annotations form queries and which videos constitute the candidate pool. Dataset identity alone does not determine a retrieval protocol.
+
+In the present setting, human reference descriptions serve as queries and relevance annotations; they are excluded from the generated-caption index. The distinction is necessary because indexing an evaluation query as a candidate's caption would provide direct answer leakage. The exact retrieval split, encoder checkpoints, and caption-generation procedure must be reported to make the evaluation comparable and reproducible. Comparisons with previously published scores are restricted to matching candidate pools, query mappings, and supervision settings.
+
