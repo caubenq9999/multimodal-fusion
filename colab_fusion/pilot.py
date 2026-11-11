@@ -76,7 +76,10 @@ def extract(c, run, limit):
     chosen = [r for r in rows if r['split']=='train'][:limit] if limit else rows
     for r in chosen:
         vid = r['video_id']; target = run/'frames'/vid; target.mkdir(parents=True,exist_ok=True)
-        if (target/'info.json').exists(): continue
+        expected_frames = [target/f'{i}.jpg' for i in range(c['frames'])]
+        if (target/'info.json').exists() and all(p.exists() for p in expected_frames): continue
+        if (target/'info.json').exists():
+            print('Repairing incomplete frame cache:', vid, flush=True)
         start=time.perf_counter()
         path=hf_hub_download(c['dataset_repo'],f'raw_videos/{vid}.mp4',repo_type='dataset',revision=rev)
         cap=cv2.VideoCapture(path); n=int(cap.get(cv2.CAP_PROP_FRAME_COUNT)); fps=cap.get(cv2.CAP_PROP_FPS)
@@ -179,7 +182,12 @@ def features(c,run,limit):
     else:
         from transformers import AutoModel,AutoProcessor
         model=AutoModel.from_pretrained(model_id,revision=rev,trust_remote_code=True,modality='vision',
-                                       default_task='retrieval',torch_dtype=torch.float16).to(device).eval()
+                                       default_task='retrieval',torch_dtype=torch.float16)
+        # Jina loads task-specific mergers/adapters after the backbone.  Some
+        # revisions retain those modules as BF16 even when torch_dtype is FP16,
+        # which produces BF16/Half LayerNorm failures on T4.  Convert the fully
+        # assembled model, including adapters, after loading.
+        model=model.to(device=device,dtype=torch.float16).eval()
         proc=AutoProcessor.from_pretrained(model_id,revision=rev,trust_remote_code=True)
         def encode(items,image=False,query=False):
             result=[]

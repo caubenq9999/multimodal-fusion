@@ -45,6 +45,9 @@ if PROFILE != 'fast': packages += ['bitsandbytes', 'qwen-vl-utils']
 if ENABLE_OCR: packages += ['easyocr']
 if ENABLE_ASR: packages += ['faster-whisper']
 subprocess.run([sys.executable,'-m','pip','install','-q']+packages,check=True)
+# torchao is optional here.  Some Colab images bundle an old release that PEFT
+# detects but rejects while Jina attaches its retrieval adapter.
+subprocess.run([sys.executable,'-m','pip','uninstall','-y','torchao'],check=False)
 subprocess.run(['apt-get','-qq','update'],check=True)
 subprocess.run(['apt-get','-qq','install','-y','ffmpeg'],check=True)
 pathlib.Path(ROOT,'pip_freeze.txt').write_text(subprocess.check_output([sys.executable,'-m','pip','freeze'],text=True))

@@ -1,24 +1,106 @@
 # Research handoff — ACIIDS multimodal video retrieval
 
-Updated: 2026-11-11. This document records the user's research decisions and the next authorized work. Inspect the actual repository before assuming any implementation or experimental result exists. Do not treat proposals or synthetic tests as real retrieval findings.
+Updated: 2026-11-12. This document records the user's research decisions, completed runs and next authorized work. Inspect the actual repository and source-of-record archives before treating a proposed or synthetic result as a real retrieval finding.
+
+## 0. Completed 500-video exploratory run and completed disjoint 1K run
+
+The user completed one real disjoint-split exploratory run of the 500-video
+candidate-fusion notebook on Colab (seed 42). Preserve the downloaded result
+ZIP as the source of record; the repository does not contain its runtime
+artifacts. Reported test MRR values were image-only 0.555500, caption-only
+0.490410, equal RRF 0.529840, validation-tuned global RRF 0.555500,
+query-only Qwen RRF 0.548673, equal vector 0.555487, validation-tuned global
+vector 0.578984 and candidate-side ADaFuSE-adapted 0.588642. The tuned RRF
+selected image/caption weights 1.0/0.0; tuned vector fusion selected 0.8/0.2.
+The Qwen baseline returned the same 0.8/0.2 weights for all 2,500 queries with
+zero parser fallbacks, so it did not exhibit query adaptation. ADaFuSE was
+significantly better than global RRF under the paired video bootstrap, but its
+MRR difference versus global vector fusion had a confidence interval crossing
+zero. These values remain exploratory until the exported artifacts are audited.
+
+The completed confirmatory experiment uses a new 1,000-video sample that reconstructs
+and excludes the exact seed-42 500-video pilot selection under dataset revision
+`947b139d0c591235a3f311e45a31a88461bad0d2`. It uses a 600/200/200 video-group
+split and up to five queries per video. Core method directions are:
+
+1. Fixed candidate image-caption vector fusion (prespecified pilot 0.8/0.2 and
+   a new validation-tuned control).
+2. Candidate-side ADaFuSE over frame and generated-caption vectors.
+3. DAR-style fixed query fusion over text and one SD3-generated query image.
+4. Query-side ADaFuSE over text and the SD3-generated query image.
+5. Pairwise query-caption ADaFuSE over the query and each candidate caption,
+   scored against the candidate frame representation.
+
+Image-only, caption-only and fixed pairwise query-caption rows remain required
+controls. The pairwise query-caption method is an ADaFuSE-inspired extension,
+not the original paper architecture, and cannot pre-index a single vector per
+video. The query-diffusion methods are single-turn video-retrieval adaptations,
+not exact DAR/ADaFuSE reproductions.
+
+New artifacts:
+
+```text
+colab_fusion/
+  ACIIDS_Five_Way_Fusion_1K_Colab.ipynb
+  five_way_1k.py
+  test_five_way_1k.py
+  build_five_way_1k_notebook.py
+  FIVE_WAY_1K_README.md
+```
+
+Two executed notebooks with Colab outputs are also preserved at repository
+root as execution evidence:
+
+```text
+ACIIDS_Five_Way_Fusion_1K_Colab.ipynb
+SOICT_Fixed_LLM_ADaFuSE_Colab (2).ipynb
+```
+
+Do not edit these as canonical source. The clean generated notebooks under
+`colab_fusion/` remain the reproducible source artifacts.
+The executed copies retain intermediate error outputs from debugging before
+the successful final stages. Do not interpret those historical tracebacks as
+failure of the exported final result.
+
+The 1K notebook uses Stable Diffusion 3 Medium, one deterministic image per
+query, the frozen CapRL/Jina backbones and adaptive seeds `[13,42,2026]`.
+SD3 is gated and subject to the Stability AI Non-Commercial Research Community
+License. High-volume artifacts were written under `/content`; every 500 new
+diffusion images could be saved as one Drive ZIP shard because the exploratory
+run exposed unreliable high-volume Google Drive FUSE writes.
+
+The real run completed 1,000 videos and 4,996 queries with a 600/200/200 video
+split and 2,999/1,000/997 train/validation/test queries. The source-of-record
+archive is `ACIIDS_1K_final_results.zip`, 532,556,133 bytes, SHA-256
+`25F3D504753D26CBD58B68448FDDBA1B4D5632FBD51EA090B94AE023CE8673D2`. Keep it
+outside Git and preserve at least two backups.
+
+Test mean MRR across seeds is 0.5433 ± 0.0093 for Candidate ADaFuSE, 0.5332 ±
+0.0029 for Query-Diffusion ADaFuSE and 0.5185 ± 0.0031 for Query-Caption
+ADaFuSE. Fixed candidate 0.8/0.2 reaches 0.5017; validation-tuned candidate and
+query-diffusion fixed controls reach 0.4986 and 0.4984. Candidate is numerically
+best, but a supplemental video-group bootstrap of seed-averaged per-query MRR
+gives Candidate minus Query-Diffusion +0.0101 with 95% CI
+[-0.0075, 0.0264]. Report them as comparable, not as a significant Candidate
+win. Every adaptive seed improves significantly over its matching fixed
+reference in the prespecified bootstrap.
 
 ## 1. Objective and current decisions
 
 Develop a conference paper targeting **ACIIDS**, extending the user's accepted SOICT 2026 paper through a new investigation of fusion methods. ACIIDS 2027 has been used to check author guidelines; confirm the target edition and current instructions before submission.
 
-The current experiment compares:
-
-1. **Fixed weights:** equal-weight RRF and globally validation-tuned weighted RRF.
-2. **LLM-suggested query weights:** an LLM receives only the search query and predicts image/caption weights, used in the same RRF formulation.
-3. **ADaFuSE adaptation:** adaptive gating plus semantic-aware expert residual fusion of image and generated-caption vectors.
-
-Include image-only, caption-only, equal vector fusion and globally tuned vector fusion as controls. The vector controls are important because ADaFuSE changes the fusion representation as well as the weighting policy.
+The completed 1K experiment compares fixed candidate image-caption fusion,
+Candidate ADaFuSE, fixed query-diffusion fusion, Query-Diffusion ADaFuSE and
+pairwise Query-Caption ADaFuSE. Image-only, caption-only, validation-tuned fixed
+controls and a prespecified candidate 0.8/0.2 control are included. The earlier
+Qwen weight-proposer belongs only to the completed 500-video exploratory run;
+it is not part of the 1K confirmatory comparison.
 
 The user explicitly rejected BLIP + CLIP for the active experiment. Use:
 
 - Caption generator: `internlm/CapRL-Qwen3VL-4B`.
 - Embedding encoder: `jinaai/jina-embeddings-v5-omni-small`.
-- Query-only weight proposer: currently `Qwen/Qwen3-0.6B` in code. This is an implementation default, not an explicitly selected research contribution or a model from the SOICT system. Record it and discuss changes before comparing runs as equivalent.
+- Query image generator: `stabilityai/stable-diffusion-3-medium-diffusers`.
 
 Do not silently switch backbones to lighter models. Model-family reuse does not mean exact reproduction of SOICT: frame sampling, pooling, quantization, prompts, dataset and relevance units differ.
 
@@ -88,10 +170,15 @@ Check that these paths exist in the actual checkout:
 
 ```text
 colab_fusion/
-  SOICT_Fixed_LLM_ADaFuSE_Colab.ipynb   # active self-contained notebook
-  pilot.py                            # preprocessing, weights, training, evaluation
+  ACIIDS_Five_Way_Fusion_1K_Colab.ipynb # active self-contained notebook
+  five_way_1k.py                        # 1K sampling, SD3, models, evaluation
+  build_five_way_1k_notebook.py
+  test_five_way_1k.py
+  FIVE_WAY_1K_README.md
+  pilot.py                              # shared preprocessing and feature code
+  SOICT_Fixed_LLM_ADaFuSE_Colab.ipynb   # completed historical 500 pilot
   test_pilot.py
-  build_notebook.py                    # dependency of the new notebook generator
+  build_notebook.py
   build_soict_notebook.py
   SOICT_ADAFUSE_README.md
 
@@ -105,48 +192,64 @@ overleaf_query_adaptive_fusion/
   ACIIDS_AUTHOR_NOTES.md
 ```
 
-The older `MSRVTT_Fusion_Colab.ipynb` is historical and defaults to a rejected lightweight profile. Do not use it as the active experiment. The new notebook generator currently depends on the old generator, so preserve both scripts until that dependency is deliberately removed.
+The older `MSRVTT_Fusion_Colab.ipynb` is historical and defaults to a rejected lightweight profile. Do not use it as the active experiment.
 
-The active notebook embeds `pilot.py`: regenerate it after modifying the runner so uploaded notebooks contain the fixes.
+The active notebook embeds both `pilot.py` and `five_way_1k.py`: regenerate it
+after modifying either runner so uploaded notebooks contain the fixes.
 
 ```bash
-python -m unittest discover -s colab_fusion -v
-python colab_fusion/build_soict_notebook.py
+python -m unittest discover -s colab_fusion -p "test_five_way_1k.py" -v
+python colab_fusion/build_five_way_1k_notebook.py
 ```
 
-## 7. Verified status — no new benchmark results yet
+## 7. Verified status — real 1K benchmark completed
 
-Completed locally:
+Completed and audited:
 
-- Dataset metadata selection and byte-size inspection.
-- Seven unit tests, including missing-modality ranks, metrics, LLM JSON validation and ADaFuSE gradients.
-- Synthetic end-to-end evaluation of the new experiment with fixed, synthetic LLM weight records and adapted ADaFuSE, including vector controls.
-- Notebook code-cell syntax checks.
+- Locked dataset and model revisions, exact pilot exclusion, and a 600/200/200
+  video-group split.
+- Real CapRL, Jina and SD3 preprocessing for all 1,000 videos and all 4,996
+  retained queries.
+- Fixed controls and all three adaptive families over seeds 13, 42 and 2026.
+- Metrics, per-query records, full test rankings, paired bootstrap, selected
+  weights, learned gates, checkpoints and training histories.
+- Archive audit: 1,000 files in each caption, feature, feature-time,
+  diffusion-metadata, diffusion-feature and diffusion-feature-time collection.
+- Notebook JSON validity and source regeneration after the HF token/logging fix.
 
-NOT completed or established:
+Not yet established:
 
-- Real CapRL/Jina/weight-proposer GPU inference for the experiment.
-- Full 500-video preprocessing or retrieval evaluation.
-- Measured GPU throughput, end-to-end latency, accuracy gains or statistical conclusions.
-- A connected Colab runtime accessible to the assistant.
+- Exact reproduction of DAR or the original interactive ADaFuSE evaluation.
+- Generalization to official MSR-VTT 1K-A or another independent benchmark.
+- Measured online query latency, energy or deployment throughput.
+- Gate-only, MoE-only, generated-caption-source and multiple-generation
+  ablations.
+- A statistically significant difference between Candidate and Query-Diffusion
+  ADaFuSE; the current 95% interval crosses zero.
 
-The previous local environment had an RTX3050 6GB, CUDA available, and no bitsandbytes/ffprobe installed in that environment. Re-check the current environment rather than assuming it is unchanged. The notebook targets Colab T4 16GB or better. CapRL 4-bit loading reduces GPU memory, not the original checkpoint download size. CapRL + Jina checkpoints were approximately 13GB in metadata; runtime storage requires extra room.
+The completed run reports an estimated 3.50 preprocessing hours excluding
+downloads, model loads, adaptive training, evaluation and interruptions.
+Preserve the actual archive rather than inferring results from a rerun estimate.
 
-## 8. Next execution steps
+## 8. Next research and writing steps
 
-1. Inspect repository instructions and current code; confirm active notebook/config and available runtime. Do not rewrite unrelated code or delete cached work.
-2. Run unit tests and regenerate the active notebook if source changed.
-3. In Colab, choose GPU, optionally mount Drive for persistent cache, use `PROFILE="soict_models"`, `N_VIDEOS=500`, `TRAINING_SEEDS=[42]` for the first exploratory run.
-4. Run installation and preparation cells. Capture GPU, dependency versions, dataset/model revisions and resolved config.
-5. Run the 20-training-video smoke test: extraction, CapRL captions, Jina features and LLM query weights. Inspect caption quality, vector shapes/norms, LLM JSON/fallback rate and runtime estimate. Do not proceed past a failed stage.
-6. Fix real runtime issues while preserving logs. Never silently substitute a different backbone. Model compatibility has not yet been validated end-to-end on Colab.
-7. Process remaining videos using caches, then complete the fixed/LLM/ADaFuSE evaluation. Choose checkpoints/weights using validation only.
-8. Export result ZIP and inspect `metrics.csv`, `per_query.csv`, `paired_bootstrap.csv`, full rankings, global weights, LLM prompt/raw outputs/fallback rate, training logs and checkpoints.
-9. If resources permit, prespecify and run seeds `[13,42,2026]`; report every seed. Do not select a seed or redesign the method based on test scores and continue calling the same test confirmatory.
+1. Back up the source-of-record result ZIP in at least two locations; do not add
+   it to ordinary Git.
+2. Update Method, Experimental Setup and Results using the exact locked config
+   and mean ± standard deviation across all three seeds.
+3. Present Candidate as numerically best and statistically comparable to
+   Query-Diffusion, not as a significant win.
+4. Position Candidate ADaFuSE as a candidate-side adaptation supporting offline
+   indexing; Query-Diffusion is closest to the original query-side ADaFuSE idea.
+5. Add online latency/compute measurements and matched gate-only/MoE-only
+   ablations before making efficiency or mechanism claims.
+6. Prespecify any new experiment and do not select architecture, seed or
+   hyperparameters using the completed test set.
 
-LLM baseline only receives the user query and a fixed modality description, never test labels, retrieved candidates or outcome-based hints. Invalid output falls back to equal weights with explicit logging. High fallback rates must be disclosed rather than reported as successful LLM weighting.
-
-Current reporting includes R@1/5/10, MRR and paired video-group bootstrap intervals (2,000 resamples). It does not include end-to-end online latency or multiple-comparison correction. Treat the first run as exploratory. Test-metric differences do not prove a particular mechanism without matched ablations.
+Current reporting includes R@1/5/10, MRR, three prespecified training seeds and
+paired video-group bootstrap intervals. It does not include multiple-comparison
+correction or end-to-end online latency. Test differences alone do not prove a
+mechanism without matched ablations.
 
 ## 9. Paper updates after implementation is stable
 

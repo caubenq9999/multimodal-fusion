@@ -1,0 +1,6 @@
+# Large exported experiment artifacts are backed up outside Git.
+ACIIDS_1K_final_results*.zip
+
+# Python runtime caches.
+__pycache__/
+*.py[cod]
